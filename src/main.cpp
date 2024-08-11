@@ -23,7 +23,7 @@
 
 // Настройки точки доступа
 const char* ssid = "ESP32-CAM-AP";
-const char* password = "12345678";
+const char* password = "UoAcYyo5FErnjXk";
 
 IPAddress local_IP(192, 168, 4, 1);
 IPAddress gateway(192, 168, 4, 1);
@@ -36,12 +36,12 @@ void startCameraServer() {
     camera_fb_t * fb = esp_camera_fb_get();
     if(!fb) {
       Serial.println("Camera capture failed");
-      server.send(500, "text/plain", "Camera capture failed");
+      server.send(200, "text/plain", "Camera capture failed");
       return;
     }
 
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "image/jpeg", (const char *)fb->buf);
+    server.send_P(200, "image/jpeg", (const char*)fb->buf, fb->len);  // Отправляем заголовки и стартуем передачу данных
     esp_camera_fb_return(fb);
   });
 
@@ -74,8 +74,8 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_QVGA;  // Установите нужный размер кадра
-  config.jpeg_quality = 10;            // Установите нужное качество JPEG
+  config.frame_size = FRAMESIZE_240X240;  // Установите нужный размер кадра
+  config.jpeg_quality = 60;            // Установите нужное качество JPEG
   config.fb_count = 1;
 
   // Инициализация камеры
@@ -95,7 +95,7 @@ void setup() {
 
   Serial.println("Access Point started");
   Serial.print("IP Address: ");
-  Serial.println(WiFi.softAPIP());  // Это будет 192.168.4.1
+  Serial.println(WiFi.softAPIP());
 
   // Запуск HTTP-сервера
   startCameraServer();
