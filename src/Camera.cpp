@@ -1,9 +1,11 @@
-#include "camera.h"
+#include <Camera.h>
+#include <esp_camera.h>
+
+#include "Arduino.h"
 
 OV2640 cam;
 
-void setupCamera()
-{
+void setupCamera() {
   // cameraSetupStarted = true;
   Serial.println("Camera setup started.");
 
@@ -31,27 +33,23 @@ void setupCamera()
   config.pixel_format = PIXFORMAT_JPEG;
 
   // Frame size configuration
-  if (psramFound())
-  {
+  if (psramFound()) {
     // psramFoundFlag = true;
     Serial.println("PSRAM found.");
-    config.frame_size = FRAMESIZE_UXGA;
+    config.frame_size = FRAMESIZE_240X240;
     config.jpeg_quality = 10;
     config.fb_count = 2;
-  }
-  else
-  {
+  } else {
     // psramFoundFlag = false;
     Serial.println("PSRAM not found.");
-    config.frame_size = FRAMESIZE_SVGA;
+    config.frame_size = FRAMESIZE_240X240;
     config.jpeg_quality = 12;
     config.fb_count = 1;
   }
 
   // Camera initialization
   esp_err_t err = cam.init(config);
-  if (err != ESP_OK)
-  {
+  if (err != ESP_OK) {
     // cameraInitFailed = true;
     Serial.println("Camera init failed.");
     return;
