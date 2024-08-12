@@ -1,8 +1,8 @@
 #include <esp_camera.h>
+#include <esp_wifi.h>
 #include <WiFi.h>
 #include <WebServer.h>
 
-// Пины для камеры (для модуля AI-Thinker ESP32-CAM)
 #define PWDN_GPIO_NUM    32
 #define RESET_GPIO_NUM   -1
 #define XCLK_GPIO_NUM    0
@@ -39,9 +39,8 @@ void startCameraServer() {
       server.send(200, "text/plain", "Camera capture failed");
       return;
     }
-
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send_P(200, "image/jpeg", (const char*)fb->buf, fb->len);  // Отправляем заголовки и стартуем передачу данных
+    server.send_P(200, "image/jpeg", (const char*)fb->buf, fb->len);
     esp_camera_fb_return(fb);
   });
 
@@ -51,8 +50,8 @@ void startCameraServer() {
 
 void setup() {
   Serial.begin(115200);
-
-  // Инициализация камеры
+  pinMode(4, OUTPUT);
+  digitalWrite(4, LOW);
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -72,35 +71,37 @@ void setup() {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
+  // config.xclk_freq_hz = 10000000;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_240X240;  // Установите нужный размер кадра
-  config.jpeg_quality = 60;            // Установите нужное качество JPEG
+  config.frame_size = FRAMESIZE_QQVGA;
+  // config.frame_size = FRAMESIZE_240X240;
+  config.jpeg_quality = 20;
   config.fb_count = 1;
 
-  // Инициализация камеры
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
 
-  // Настройка статического IP
   if (!WiFi.softAPConfig(local_IP, gateway, subnet)) {
     Serial.println("STA Failed to configure");
   }
 
-  // Запуск точки доступа
   WiFi.softAP(ssid, password);
 
   Serial.println("Access Point started");
   Serial.print("IP Address: ");
   Serial.println(WiFi.softAPIP());
 
-  // Запуск HTTP-сервера
+  esp_wifi_set_max_tx_power(2);
+  setCpuFrequencyMhz(80);
+
   startCameraServer();
 }
 
 void loop() {
   server.handleClient();
+  delay(10);
 }
