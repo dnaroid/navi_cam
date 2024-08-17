@@ -1,7 +1,18 @@
-#include <SPI.h>
-#include <TFT_eSPI.h>
+#include <esp32-hal-gpio.h>
+#include <esp_wifi.h>
+#include <HTTPClient.h>
+#include <WiFi.h>
 
+#include "Arduino.h"
 #include "esp_camera.h"
+
+#define WIFI_SSID "ESP32-SCOOTER"
+#define WIFI_PASSWORD "UoAcYyo5FErnjXk"
+#define IMAGE_CAPTURE_URL "http://192.168.4.1/jpg"
+
+// #define WIFI_SSID "PLAY_Swiatlowod_C894"
+// #define WIFI_PASSWORD "MFEtYRc3"
+// #define IMAGE_CAPTURE_URL "http://192.168.0.226:5000/upload"
 
 #define PWDN_GPIO_NUM    32
 #define RESET_GPIO_NUM   -1
@@ -21,25 +32,6 @@
 #define HREF_GPIO_NUM    23
 #define PCLK_GPIO_NUM    22
 
-// #define TFT_MOSI 13 //s3  11
-// #define TFT_MISO 12 // -------
-// #define TFT_SCLK 14 // s3 12
-// #define TFT_CS   15 // s3  10
-// #define TFT_DC   2  // s3  14
-
-#define LED_PIN 4
-
-
-// auto spiDisplay = SPIClass(HSPI);
-auto TFT = TFT_eSPI();
-
-void setupDispaly() {
-  // spiDisplay.begin(TFT_SCLK, TFT_MISO, TFT_MOSI, TFT_CS);
-  // spiDisplay.setFrequency(80000000);
-  TFT.init();
-  TFT.setAttribute(UTF8_SWITCH, 1);
-  TFT.setRotation(2);
-}
 
 void setupCamera() {
   Serial.println("Camera setup started.");
@@ -64,11 +56,9 @@ void setupCamera() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_RGB565;
-  // config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_QVGA;
-  // config.frame_size = FRAMESIZE_QQVGA;
-  // config.jpeg_quality = 10;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.frame_size = FRAMESIZE_240X240;
+  config.jpeg_quality = 10;
   config.fb_count = 2;
 
   const esp_err_t err = esp_camera_init(&config);
@@ -85,11 +75,17 @@ bool isReady = false;
 void setup() {
   Serial.begin(115200);
 
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-
-  setupDispaly();
   setupCamera();
+
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_max_tx_power(1);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
 }
 
 void loop() {
@@ -100,7 +96,34 @@ void loop() {
     return;
   }
 
-  TFT.pushImage(0, 0, fb->width, fb->height, fb->buf);
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+
+    http.begin(IMAGE_CAPTURE_URL);
+    http.addHeader("Content-Type", "image/jpeg");
+
+    int httpResponseCode = http.POST(fb->buf, fb->len);
+
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println(httpResponseCode);
+      Serial.println(response);
+    } else {
+      Serial.printf("Error occurred: %s\n", http.errorToString(httpResponseCode).c_str());
+    }
+
+    http.end();
+  } else {
+    Serial.println("WiFi not connected");
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+    }
+    Serial.println("WiFi connected");
+  }
 
   esp_camera_fb_return(fb);
+  delay(1000); // Задержка перед следующей отправкой изображения
 }
