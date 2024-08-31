@@ -138,7 +138,7 @@ void setup() {
 
   // setCpuFrequencyMhz(80);
   esp_wifi_set_max_tx_power(1);
-  wifiMulti.addAP("SSID1", "PASSWORD1");
+  wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
 
   Serial.println("Camera ready");
 }
