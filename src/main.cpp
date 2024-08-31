@@ -102,12 +102,14 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
     Serial.println("Connected");
     break;
   case WStype_TEXT:
-    Serial.printf("Received text: %p\n", payload);
-    if (strcmp(reinterpret_cast<char*>(payload), "camera.start") == 0) {
+    Serial.printf("Get text: %s\n", payload);
+    if (strcmp(reinterpret_cast<const char*>(payload), "start") == 0) {
       if (!camReady) setupCamera();
       camEnabled = true;
-    } else if (strcmp(reinterpret_cast<char*>(payload), "camera.stop") == 0) {
+    } else if (strcmp(reinterpret_cast<char*>(payload), "stop") == 0) {
       camEnabled = false;
+      esp_camera_deinit();
+      camReady = false;
     }
     break;
   default:
@@ -140,19 +142,24 @@ void setup() {
   esp_wifi_set_max_tx_power(1);
   wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
 
+  while (wifiMulti.run() != WL_CONNECTED) {
+    delay(100);
+  }
+
+  webSocket.begin("192.168.4.1", 81, "/");
+  webSocket.onEvent(webSocketEvent);
+  webSocket.setReconnectInterval(5000);
   Serial.println("Camera ready");
 }
 
 void loop() {
-  if (wifiMulti.run() == WL_CONNECTED) {
-    webSocket.loop();
+  webSocket.loop();
 
-    if (camEnabled) {
-      camera_fb_t* fb = esp_camera_fb_get();
-      if (fb) {
-        webSocket.sendBIN(fb->buf, fb->len);
-        esp_camera_fb_return(fb);
-      }
+  if (camEnabled) {
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (fb) {
+      webSocket.sendBIN(fb->buf, fb->len);
+      esp_camera_fb_return(fb);
     }
   }
 }
