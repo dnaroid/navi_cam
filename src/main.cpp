@@ -1,25 +1,41 @@
-#include <esp32-hal-gpio.h>
+#include <esp_bt.h>
+#include <esp_bt_main.h>
 #include <esp_wifi.h>
-#include <HTTPClient.h>
-#include <WiFi.h>
 
 #include "Arduino.h"
 #include "esp_camera.h"
+#include <WebSocketsClient.h>
+#include <WiFiMulti.h>
+
+// #define CAMERA_MODEL_XIAO_ESP32S3
 
 #define WIFI_SSID "ESP32-SCOOTER"
 #define WIFI_PASSWORD "UoAcYyo5FErnjXk"
-#define IMAGE_CAPTURE_URL "http://192.168.4.1/jpg"
 
-// #define WIFI_SSID "PLAY_Swiatlowod_C894"
-// #define WIFI_PASSWORD "MFEtYRc3"
-// #define IMAGE_CAPTURE_URL "http://192.168.0.226:5000/upload"
-
+#if defined(CAMERA_MODEL_XIAO_ESP32S3)
+#define PWDN_GPIO_NUM     -1
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM     10
+#define SIOD_GPIO_NUM     40
+#define SIOC_GPIO_NUM     39
+#define Y9_GPIO_NUM       48
+#define Y8_GPIO_NUM       11
+#define Y7_GPIO_NUM       12
+#define Y6_GPIO_NUM       14
+#define Y5_GPIO_NUM       16
+#define Y4_GPIO_NUM       18
+#define Y3_GPIO_NUM       17
+#define Y2_GPIO_NUM       15
+#define VSYNC_GPIO_NUM    38
+#define HREF_GPIO_NUM     47
+#define PCLK_GPIO_NUM     13
+#define LED_GPIO_NUM      21
+#else
 #define PWDN_GPIO_NUM    32
 #define RESET_GPIO_NUM   -1
 #define XCLK_GPIO_NUM    0
 #define SIOD_GPIO_NUM    26
 #define SIOC_GPIO_NUM    27
-
 #define Y9_GPIO_NUM      35
 #define Y8_GPIO_NUM      34
 #define Y7_GPIO_NUM      39
@@ -31,7 +47,13 @@
 #define VSYNC_GPIO_NUM   25
 #define HREF_GPIO_NUM    23
 #define PCLK_GPIO_NUM    22
+#endif
 
+
+WebSocketsClient webSocket;
+WiFiMulti wifiMulti;
+bool camEnabled = false;
+bool camReady = false;
 
 void setupCamera() {
   Serial.println("Camera setup started.");
@@ -57,9 +79,10 @@ void setupCamera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_240X240;
+  config.frame_size = FRAMESIZE_QQVGA;
   config.jpeg_quality = 10;
   config.fb_count = 2;
+
 
   const esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
@@ -67,63 +90,69 @@ void setupCamera() {
     return;
   }
   Serial.println("Camera setup completed successfully.");
+  camReady = true;
 }
 
-bool isReady = false;
+void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+  case WStype_DISCONNECTED:
+    Serial.println("Disconnected");
+    break;
+  case WStype_CONNECTED:
+    Serial.println("Connected");
+    break;
+  case WStype_TEXT:
+    Serial.printf("Received text: %p\n", payload);
+    if (strcmp(reinterpret_cast<char*>(payload), "camera.start") == 0) {
+      if (!camReady) setupCamera();
+      camEnabled = true;
+    } else if (strcmp(reinterpret_cast<char*>(payload), "camera.stop") == 0) {
+      camEnabled = false;
+    }
+    break;
+  default:
+    break;
+  }
+}
 
+void disableBluetooth() {
+  if (esp_bluedroid_disable() == ESP_OK) {
+    Serial.println("Bluetooth stack disabled");
+  } else {
+    Serial.println("Failed to disable Bluetooth stack");
+  }
+
+  if (esp_bt_controller_disable() == ESP_OK) {
+    Serial.println("Bluetooth controller disabled");
+  } else {
+    Serial.println("Failed to disable Bluetooth controller");
+  }
+}
 
 void setup() {
   Serial.begin(115200);
 
-  setupCamera();
+#if defined(CAMERA_MODEL_XIAO_ESP32S3)
+  disableBluetooth();
+#endif
 
-  WiFi.mode(WIFI_STA);
+  // setCpuFrequencyMhz(80);
   esp_wifi_set_max_tx_power(1);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  wifiMulti.addAP("SSID1", "PASSWORD1");
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("WiFi connected");
+  Serial.println("Camera ready");
 }
 
 void loop() {
-  camera_fb_t* fb = esp_camera_fb_get();
+  if (wifiMulti.run() == WL_CONNECTED) {
+    webSocket.loop();
 
-  if (!fb) {
-    Serial.println("Failed to capture image");
-    return;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-
-    http.begin(IMAGE_CAPTURE_URL);
-    http.addHeader("Content-Type", "image/jpeg");
-
-    int httpResponseCode = http.POST(fb->buf, fb->len);
-
-    if (httpResponseCode > 0) {
-      String response = http.getString();
-      Serial.println(httpResponseCode);
-      Serial.println(response);
-    } else {
-      Serial.printf("Error occurred: %s\n", http.errorToString(httpResponseCode).c_str());
+    if (camEnabled) {
+      camera_fb_t* fb = esp_camera_fb_get();
+      if (fb) {
+        webSocket.sendBIN(fb->buf, fb->len);
+        esp_camera_fb_return(fb);
+      }
     }
-
-    http.end();
-  } else {
-    Serial.println("WiFi not connected");
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      Serial.print(".");
-    }
-    Serial.println("WiFi connected");
   }
-
-  esp_camera_fb_return(fb);
-  delay(1000); // Задержка перед следующей отправкой изображения
 }
