@@ -7,12 +7,10 @@
 #include <WebSocketsClient.h>
 #include <WiFiMulti.h>
 
-// #define CAMERA_MODEL_XIAO_ESP32S3
-
 #define WIFI_SSID "ESP32-SCOOTER"
 #define WIFI_PASSWORD "UoAcYyo5FErnjXk"
 
-#if defined(CAMERA_MODEL_XIAO_ESP32S3)
+#if defined(SEEED_XIAO_ESP32S3)
 #define PWDN_GPIO_NUM     -1
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM     10
@@ -53,7 +51,20 @@
 WebSocketsClient webSocket;
 WiFiMulti wifiMulti;
 bool camEnabled = false;
-bool camReady = false;
+TaskHandle_t sendFrameTaskHandle = NULL;
+
+void sendFrameTask(void* parameter) {
+  while (true) {
+    if (camEnabled) {
+      camera_fb_t* fb = esp_camera_fb_get();
+      if (fb) {
+        webSocket.sendBIN(fb->buf, fb->len);
+        esp_camera_fb_return(fb);
+      }
+    }
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+  }
+}
 
 void setupCamera() {
   Serial.println("Camera setup started.");
@@ -90,7 +101,6 @@ void setupCamera() {
     return;
   }
   Serial.println("Camera setup completed successfully.");
-  camReady = true;
 }
 
 void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
@@ -104,12 +114,11 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   case WStype_TEXT:
     Serial.printf("Get text: %s\n", payload);
     if (strcmp(reinterpret_cast<const char*>(payload), "start") == 0) {
-      if (!camReady) setupCamera();
       camEnabled = true;
+      digitalWrite(LED_GPIO_NUM, LOW);
     } else if (strcmp(reinterpret_cast<char*>(payload), "stop") == 0) {
       camEnabled = false;
-      esp_camera_deinit();
-      camReady = false;
+      digitalWrite(LED_GPIO_NUM, HIGH);
     }
     break;
   default:
@@ -117,29 +126,18 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   }
 }
 
-void disableBluetooth() {
-  if (esp_bluedroid_disable() == ESP_OK) {
-    Serial.println("Bluetooth stack disabled");
-  } else {
-    Serial.println("Failed to disable Bluetooth stack");
-  }
-
-  if (esp_bt_controller_disable() == ESP_OK) {
-    Serial.println("Bluetooth controller disabled");
-  } else {
-    Serial.println("Failed to disable Bluetooth controller");
-  }
-}
-
 void setup() {
   Serial.begin(115200);
 
-#if defined(CAMERA_MODEL_XIAO_ESP32S3)
-  disableBluetooth();
-#endif
+  pinMode(LED_GPIO_NUM, OUTPUT);
+  digitalWrite(LED_GPIO_NUM, HIGH);
 
-  // setCpuFrequencyMhz(80);
+  setCpuFrequencyMhz(80);
   esp_wifi_set_max_tx_power(1);
+  esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+
+  setupCamera();
+
   wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
 
   while (wifiMulti.run() != WL_CONNECTED) {
@@ -148,18 +146,22 @@ void setup() {
 
   webSocket.begin("192.168.4.1", 81, "/");
   webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(5000);
+  webSocket.setReconnectInterval(1000);
+
+  xTaskCreatePinnedToCore(
+    sendFrameTask, // Function to implement the task
+    "SendFrameTask", // Name of the task
+    8192 * 2, // Stack size in words
+    NULL, // Task input parameter
+    2, // Priority of the task
+    &sendFrameTaskHandle, // Task handle
+    1 // Core where the task should run
+  );
+
   Serial.println("Camera ready");
 }
 
 void loop() {
   webSocket.loop();
-
-  if (camEnabled) {
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (fb) {
-      webSocket.sendBIN(fb->buf, fb->len);
-      esp_camera_fb_return(fb);
-    }
-  }
+  vTaskDelay(50 / portTICK_PERIOD_MS);
 }
