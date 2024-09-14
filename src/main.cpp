@@ -1,14 +1,13 @@
-#include <esp_bt.h>
-#include <esp_bt_main.h>
-#include <esp_wifi.h>
-
 #include "Arduino.h"
 #include "esp_camera.h"
-#include <WebSocketsClient.h>
-#include <WiFiMulti.h>
 
-#define WIFI_SSID "ESP32-SCOOTER"
-#define WIFI_PASSWORD "UoAcYyo5FErnjXk"
+
+#define MIRROR_RX D1
+#define MIRROR_TX D2
+// #define MIRROR_UART_BAUD 115200
+#define MIRROR_UART_BAUD   4000000
+static HardwareSerial mirrorSerial(1);
+
 
 #if defined(SEEED_XIAO_ESP32S3)
 #define PWDN_GPIO_NUM     -1
@@ -47,25 +46,6 @@
 #define PCLK_GPIO_NUM    22
 #endif
 
-
-WebSocketsClient webSocket;
-WiFiMulti wifiMulti;
-bool camEnabled = false;
-TaskHandle_t sendFrameTaskHandle = NULL;
-
-void sendFrameTask(void* parameter) {
-  while (true) {
-    if (camEnabled) {
-      camera_fb_t* fb = esp_camera_fb_get();
-      if (fb) {
-        webSocket.sendBIN(fb->buf, fb->len);
-        esp_camera_fb_return(fb);
-      }
-    }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-  }
-}
-
 void setupCamera() {
   Serial.println("Camera setup started.");
 
@@ -89,8 +69,8 @@ void setupCamera() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_JPEG;
   config.frame_size = FRAMESIZE_QQVGA;
+  config.pixel_format = PIXFORMAT_JPEG;
   config.jpeg_quality = 10;
   config.fb_count = 2;
 
@@ -103,65 +83,38 @@ void setupCamera() {
   Serial.println("Camera setup completed successfully.");
 }
 
-void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
-  switch (type) {
-  case WStype_DISCONNECTED:
-    Serial.println("Disconnected");
-    break;
-  case WStype_CONNECTED:
-    Serial.println("Connected");
-    break;
-  case WStype_TEXT:
-    Serial.printf("Get text: %s\n", payload);
-    if (strcmp(reinterpret_cast<const char*>(payload), "start") == 0) {
-      camEnabled = true;
-      digitalWrite(LED_GPIO_NUM, LOW);
-    } else if (strcmp(reinterpret_cast<char*>(payload), "stop") == 0) {
-      camEnabled = false;
-      digitalWrite(LED_GPIO_NUM, HIGH);
-    }
-    break;
-  default:
-    break;
-  }
-}
-
 void setup() {
+  // int waitCount = 0;
+  // while (!Serial.available() && waitCount++ < 100) {
   Serial.begin(115200);
+  // delay(100);
+  // }
+  Serial.println("Starting");
+
+  setupCamera();
 
   pinMode(LED_GPIO_NUM, OUTPUT);
   digitalWrite(LED_GPIO_NUM, HIGH);
 
-  setCpuFrequencyMhz(80);
-  esp_wifi_set_max_tx_power(1);
-  esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
-
-  setupCamera();
-
-  wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
-
-  while (wifiMulti.run() != WL_CONNECTED) {
-    delay(100);
-  }
-
-  webSocket.begin("192.168.4.1", 81, "/");
-  webSocket.onEvent(webSocketEvent);
-  webSocket.setReconnectInterval(1000);
-
-  xTaskCreatePinnedToCore(
-    sendFrameTask, // Function to implement the task
-    "SendFrameTask", // Name of the task
-    8192 * 2, // Stack size in words
-    NULL, // Task input parameter
-    2, // Priority of the task
-    &sendFrameTaskHandle, // Task handle
-    1 // Core where the task should run
-  );
-
-  Serial.println("Camera ready");
+  mirrorSerial.begin(MIRROR_UART_BAUD, SERIAL_8N1, MIRROR_RX, MIRROR_TX);
 }
 
 void loop() {
-  webSocket.loop();
-  vTaskDelay(50 / portTICK_PERIOD_MS);
+  if (mirrorSerial.available()) {
+    const String command = mirrorSerial.readStringUntil('\r');
+
+    if (command.equals("img")) {
+      digitalWrite(LED_GPIO_NUM, LOW);
+      camera_fb_t* fb = esp_camera_fb_get();
+      if (fb) {
+        uint16_t length = fb->len;
+        mirrorSerial.write(reinterpret_cast<uint8_t*>(&length), sizeof(length));
+        mirrorSerial.write(fb->buf, fb->len);
+        esp_camera_fb_return(fb);
+      } else {
+        Serial.println("error");
+      }
+      digitalWrite(LED_GPIO_NUM, HIGH);
+    }
+  }
 }
