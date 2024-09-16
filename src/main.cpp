@@ -52,19 +52,7 @@ WebSocketsClient webSocket;
 WiFiMulti wifiMulti;
 bool camEnabled = false;
 TaskHandle_t sendFrameTaskHandle = NULL;
-
-void sendFrameTask(void* parameter) {
-  while (true) {
-    if (camEnabled) {
-      camera_fb_t* fb = esp_camera_fb_get();
-      if (fb) {
-        webSocket.sendBIN(fb->buf, fb->len);
-        esp_camera_fb_return(fb);
-      }
-    }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-  }
-}
+camera_fb_t* _fb;
 
 void setupCamera() {
   Serial.println("Camera setup started.");
@@ -90,7 +78,9 @@ void setupCamera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_QQVGA;
+  // config.frame_size = FRAMESIZE_QQVGA;
+  // config.frame_size = FRAMESIZE_HQVGA;
+  config.frame_size = FRAMESIZE_240X240;
   config.jpeg_quality = 10;
   config.fb_count = 2;
 
@@ -103,6 +93,22 @@ void setupCamera() {
   Serial.println("Camera setup completed successfully.");
 }
 
+void sendFrameTask(void* parameter) {
+  while (true) {
+    if (camEnabled) {
+      camera_fb_t* fb = esp_camera_fb_get();
+      if (fb) {
+        digitalWrite(LED_GPIO_NUM, LOW);
+        webSocket.sendBIN(fb->buf, fb->len);
+        digitalWrite(LED_GPIO_NUM, HIGH);
+        esp_camera_fb_return(fb);
+      }
+    }
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+  }
+}
+
+
 void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
   case WStype_DISCONNECTED:
@@ -110,15 +116,16 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
     break;
   case WStype_CONNECTED:
     Serial.println("Connected");
+    _fb = esp_camera_fb_get();
+    webSocket.sendTXT(String(_fb->width) + "," + String(_fb->height));
+    esp_camera_fb_return(_fb);
     break;
   case WStype_TEXT:
-    Serial.printf("Get text: %s\n", payload);
+    // Serial.printf("Get text: %s\n", payload);
     if (strcmp(reinterpret_cast<const char*>(payload), "start") == 0) {
       camEnabled = true;
-      digitalWrite(LED_GPIO_NUM, LOW);
     } else if (strcmp(reinterpret_cast<char*>(payload), "stop") == 0) {
       camEnabled = false;
-      digitalWrite(LED_GPIO_NUM, HIGH);
     }
     break;
   default:
@@ -132,7 +139,7 @@ void setup() {
   pinMode(LED_GPIO_NUM, OUTPUT);
   digitalWrite(LED_GPIO_NUM, HIGH);
 
-  setCpuFrequencyMhz(80);
+  // setCpuFrequencyMhz(80);
   esp_wifi_set_max_tx_power(1);
   esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
